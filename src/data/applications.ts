@@ -392,6 +392,7 @@ export const applications: RehearsalApplication[] = [
 export const conflicts: Conflict[] = [
   {
     id: "conf1",
+    signature: "time|venue1|2024-01-15|app3,app7",
     type: "time_overlap",
     description: "大礼堂上午场与外语学院活动时间重叠",
     severity: "high",
@@ -402,6 +403,7 @@ export const conflicts: Conflict[] = [
   },
   {
     id: "conf2",
+    signature: "teacher|t1|2024-01-12|app6,app8",
     type: "teacher_conflict",
     description: "李芳菲老师同一时段被两个舞蹈排练预约",
     severity: "high",
@@ -412,6 +414,7 @@ export const conflicts: Conflict[] = [
   },
   {
     id: "conf3",
+    signature: "equipment|eq3|2024-01-15|app3,app7,app9",
     type: "equipment_conflict",
     description: "无线麦克风库存不足，有3个申请同时需要使用",
     severity: "medium",
@@ -426,6 +429,7 @@ export const conflicts: Conflict[] = [
   },
   {
     id: "conf4",
+    signature: "capacity|venue6|app4",
     type: "capacity_exceeded",
     description: "多功能排练厅容量100人，申请人数120人",
     severity: "medium",
@@ -436,6 +440,7 @@ export const conflicts: Conflict[] = [
   },
   {
     id: "conf5",
+    signature: "time|venue6|2024-01-13|app14,app16",
     type: "time_overlap",
     description: "多功能排练厅周六上午两个申请时间重叠",
     severity: "low",

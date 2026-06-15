@@ -55,8 +55,18 @@ const Dashboard = () => {
     form.equipmentIds.includes(e.id)
   );
 
+  const timeInvalid = form.startTime >= form.endTime;
+  const participantInvalid = form.participantCount <= 0 || isNaN(form.participantCount);
+  const formValid =
+    form.clubId &&
+    form.activityName &&
+    form.venueId &&
+    form.date &&
+    !timeInvalid &&
+    !participantInvalid;
+
   const handleSubmit = () => {
-    if (!form.clubId || !form.activityName || !form.venueId || !form.date) return;
+    if (!formValid) return;
     addApplication({
       clubId: form.clubId,
       clubName: selectedClub?.name || "",
@@ -446,9 +456,16 @@ const Dashboard = () => {
                 type="number"
                 min={1}
                 value={form.participantCount}
-                onChange={(e) => setForm({ ...form, participantCount: parseInt(e.target.value) || 1 })}
-                className="w-full h-9 px-3 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
+                onChange={(e) => setForm({ ...form, participantCount: parseInt(e.target.value) || 0 })}
+                className={`w-full h-9 px-3 border rounded-lg text-sm focus:outline-none focus:ring-2 ${
+                  participantInvalid
+                    ? "border-danger-400 focus:ring-danger-200"
+                    : "border-slate-300 focus:ring-primary-300"
+                }`}
               />
+              {participantInvalid && (
+                <p className="text-xs text-danger-500 mt-1">人数必须大于 0</p>
+              )}
             </div>
           </div>
 
@@ -472,7 +489,11 @@ const Dashboard = () => {
                 type="time"
                 value={form.startTime}
                 onChange={(e) => setForm({ ...form, startTime: e.target.value })}
-                className="w-full h-9 px-3 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
+                className={`w-full h-9 px-3 border rounded-lg text-sm focus:outline-none focus:ring-2 ${
+                  timeInvalid
+                    ? "border-danger-400 focus:ring-danger-200"
+                    : "border-slate-300 focus:ring-primary-300"
+                }`}
               />
             </div>
             <div>
@@ -483,8 +504,15 @@ const Dashboard = () => {
                 type="time"
                 value={form.endTime}
                 onChange={(e) => setForm({ ...form, endTime: e.target.value })}
-                className="w-full h-9 px-3 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
+                className={`w-full h-9 px-3 border rounded-lg text-sm focus:outline-none focus:ring-2 ${
+                  timeInvalid
+                    ? "border-danger-400 focus:ring-danger-200"
+                    : "border-slate-300 focus:ring-primary-300"
+                }`}
               />
+              {timeInvalid && (
+                <p className="text-xs text-danger-500 mt-1">结束时间必须晚于开始时间</p>
+              )}
             </div>
           </div>
 
@@ -547,7 +575,7 @@ const Dashboard = () => {
             </Button>
             <Button
               onClick={handleSubmit}
-              disabled={!form.clubId || !form.activityName || !form.venueId || !form.date}
+              disabled={!formValid}
             >
               <Plus className="w-4 h-4 mr-2" />
               提交申请

@@ -61,6 +61,8 @@ export const sortApplications = (
     .sort((a, b) => (b.priorityScore || 0) - (a.priorityScore || 0));
 };
 
+const sig = (parts: string[]) => parts.join("|");
+
 export const detectTimeConflicts = (
   applications: RehearsalApplication[]
 ): Conflict[] => {
@@ -106,16 +108,19 @@ export const detectTimeConflicts = (
             if (overlapDuration > 60) severity = "high";
             else if (overlapDuration > 30) severity = "medium";
 
+            const appIds = [dateApps[i].id, dateApps[j].id].sort();
+            const appNames = appIds.map(
+              (id) => dateApps.find((a) => a.id === id)?.activityName || ""
+            );
+
             conflicts.push({
               id: `conf_time_${conflictId++}`,
+              signature: sig(["time", venueId, date, appIds.join(",")]),
               type: "time_overlap" as ConflictType,
               description: `${dateApps[i].venueName}在${date}有时间重叠`,
               severity,
-              relatedApplicationIds: [dateApps[i].id, dateApps[j].id],
-              relatedApplicationNames: [
-                dateApps[i].activityName,
-                dateApps[j].activityName,
-              ],
+              relatedApplicationIds: appIds,
+              relatedApplicationNames: appNames,
               status: "pending",
               createdAt: new Date().toISOString(),
             });
@@ -147,6 +152,7 @@ export const detectCapacityConflicts = (
 
         conflicts.push({
           id: `conf_cap_${conflictId++}`,
+          signature: sig(["capacity", app.venueId, app.id]),
           type: "capacity_exceeded" as ConflictType,
           description: `${app.venueName}容量${venue.capacity}人，申请人数${app.participantCount}人`,
           severity,
@@ -220,13 +226,17 @@ export const detectEquipmentConflicts = (
         else if (overlapping.length - equipment.totalQuantity >= 2)
           severity = "medium";
 
+        const appIds = overlapping.map((a) => a.id).sort();
+        const appNames = overlapping.map((a) => a.activityName);
+
         conflicts.push({
           id: `conf_eq_${conflictId++}`,
+          signature: sig(["equipment", eqId, date, appIds.join(",")]),
           type: "equipment_conflict" as ConflictType,
           description: `${equipment.name}库存${equipment.totalQuantity}件，${date}同时需要${overlapping.length}件`,
           severity,
-          relatedApplicationIds: overlapping.map((a) => a.id),
-          relatedApplicationNames: overlapping.map((a) => a.activityName),
+          relatedApplicationIds: appIds,
+          relatedApplicationNames: appNames,
           status: "pending",
           createdAt: new Date().toISOString(),
         });
@@ -247,10 +257,10 @@ export const detectTeacherConflicts = (
     .filter((a) => a.status === "approved" || a.status === "pending")
     .filter((a) => a.teacherId)
     .forEach((app) => {
-      if (!teacherApps[app.teacherId]) {
-        teacherApps[app.teacherId] = [];
+      if (!teacherApps[app.teacherId!]) {
+        teacherApps[app.teacherId!] = [];
       }
-      teacherApps[app.teacherId].push(app);
+      teacherApps[app.teacherId!].push(app);
     });
 
   let conflictId = 0;
@@ -274,16 +284,19 @@ export const detectTeacherConflicts = (
               dateApps[j].endTime
             )
           ) {
+            const appIds = [dateApps[i].id, dateApps[j].id].sort();
+            const appNames = appIds.map(
+              (id) => dateApps.find((a) => a.id === id)?.activityName || ""
+            );
+
             conflicts.push({
               id: `conf_teacher_${conflictId++}`,
+              signature: sig(["teacher", teacherId, date, appIds.join(",")]),
               type: "teacher_conflict" as ConflictType,
               description: `${dateApps[i].teacherName}老师在${date}有时间冲突`,
               severity: "high",
-              relatedApplicationIds: [dateApps[i].id, dateApps[j].id],
-              relatedApplicationNames: [
-                dateApps[i].activityName,
-                dateApps[j].activityName,
-              ],
+              relatedApplicationIds: appIds,
+              relatedApplicationNames: appNames,
               status: "pending",
               createdAt: new Date().toISOString(),
             });

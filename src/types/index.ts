@@ -92,6 +92,7 @@ export interface RehearsalApplication {
 
 export interface Conflict {
   id: string;
+  signature: string;
   type: ConflictType;
   description: string;
   severity: ConflictSeverity;
