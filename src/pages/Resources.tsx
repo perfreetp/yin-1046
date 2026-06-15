@@ -58,14 +58,26 @@ const Resources = () => {
 
   const tabs = [
     { id: "venues" as TabType, label: "场地排期", icon: Building2 },
-    { id: "equipment" as TabType, label: "设备管理", icon: Package },
+    { id: "equipment" as TabType, label: "设备排期", icon: Package },
     { id: "teachers" as TabType, label: "老师排期", icon: UserCheck },
     { id: "blocked" as TabType, label: "封场管理", icon: CalendarX },
   ];
 
   const getVenueSchedule = (venueId: string, date: string) => {
     return applications.filter(
-      (a) => a.venueId === venueId && a.date === date && a.status === "approved"
+      (a) => a.venueId === venueId && a.date === date && (a.status === "approved" || a.status === "pending")
+    );
+  };
+
+  const getEquipmentSchedule = (eqId: string, date: string) => {
+    return applications.filter(
+      (a) => a.equipmentIds.includes(eqId) && a.date === date && (a.status === "approved" || a.status === "pending")
+    );
+  };
+
+  const getTeacherSchedule = (teacherId: string, date: string) => {
+    return applications.filter(
+      (a) => a.teacherId === teacherId && a.date === date && (a.status === "approved" || a.status === "pending")
     );
   };
 
@@ -117,10 +129,56 @@ const Resources = () => {
     }
   };
 
-  const timeLabels = [];
-  for (let h = 8; h <= 22; h += 2) {
-    timeLabels.push(`${h.toString().padStart(2, "0")}:00`);
-  }
+  const weekNav = (
+    <div className="flex items-center gap-2">
+      <button
+        onClick={() => setWeekOffset(weekOffset - 1)}
+        className="p-1.5 text-slate-500 hover:text-primary-600 hover:bg-slate-100 rounded-lg transition-colors"
+      >
+        <ChevronLeft className="w-5 h-5" />
+      </button>
+      <span className="text-sm font-medium text-slate-700 min-w-[200px] text-center">
+        {formatDateDisplay(weekDates[0])} - {formatDateDisplay(weekDates[6])}
+      </span>
+      <button
+        onClick={() => setWeekOffset(weekOffset + 1)}
+        className="p-1.5 text-slate-500 hover:text-primary-600 hover:bg-slate-100 rounded-lg transition-colors"
+      >
+        <ChevronRight className="w-5 h-5" />
+      </button>
+    </div>
+  );
+
+  const legendApproved = (
+    <span className="flex items-center gap-1">
+      <span className="w-3 h-3 rounded bg-success-500" />
+      已批准
+    </span>
+  );
+  const legendPending = (
+    <span className="flex items-center gap-1">
+      <span className="w-3 h-3 rounded bg-warning-500" />
+      待审批
+    </span>
+  );
+
+  const renderWeekHeader = () => (
+    <div className="flex border-b border-slate-200">
+      <div className="w-32 flex-shrink-0 p-3 text-sm font-medium text-slate-600">
+        资源
+      </div>
+      <div className="flex-1 flex">
+        {weekDates.map((date) => (
+          <div key={date} className="flex-1 p-3 text-center">
+            <p className="text-sm font-medium text-slate-700">
+              {getWeekdayName(date)}
+            </p>
+            <p className="text-xs text-slate-500">{date.slice(5)}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 
   return (
     <div className="space-y-6">
@@ -162,32 +220,10 @@ const Resources = () => {
           {activeTab === "venues" && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setWeekOffset(weekOffset - 1)}
-                    className="p-1.5 text-slate-500 hover:text-primary-600 hover:bg-slate-100 rounded-lg transition-colors"
-                  >
-                    <ChevronLeft className="w-5 h-5" />
-                  </button>
-                  <span className="text-sm font-medium text-slate-700 min-w-[200px] text-center">
-                    {formatDateDisplay(weekDates[0])} - {formatDateDisplay(weekDates[6])}
-                  </span>
-                  <button
-                    onClick={() => setWeekOffset(weekOffset + 1)}
-                    className="p-1.5 text-slate-500 hover:text-primary-600 hover:bg-slate-100 rounded-lg transition-colors"
-                  >
-                    <ChevronRight className="w-5 h-5" />
-                  </button>
-                </div>
+                {weekNav}
                 <div className="flex items-center gap-4 text-xs text-slate-500">
-                  <span className="flex items-center gap-1">
-                    <span className="w-3 h-3 rounded bg-success-500" />
-                    已批准
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="w-3 h-3 rounded bg-warning-500" />
-                    待审批
-                  </span>
+                  {legendApproved}
+                  {legendPending}
                   <span className="flex items-center gap-1">
                     <span className="w-3 h-3 rounded bg-danger-500" />
                     封场
@@ -197,27 +233,7 @@ const Resources = () => {
 
               <div className="overflow-x-auto">
                 <div className="min-w-[900px]">
-                  <div className="flex border-b border-slate-200">
-                    <div className="w-32 flex-shrink-0 p-3 text-sm font-medium text-slate-600">
-                      场地
-                    </div>
-                    <div className="flex-1 flex">
-                      {weekDates.map((date) => (
-                        <div
-                          key={date}
-                          className="flex-1 p-3 text-center"
-                        >
-                          <p className="text-sm font-medium text-slate-700">
-                            {getWeekdayName(date)}
-                          </p>
-                          <p className="text-xs text-slate-500">
-                            {date.slice(5)}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
+                  {renderWeekHeader()}
                   {venues.map((venue) => (
                     <div
                       key={venue.id}
@@ -225,47 +241,36 @@ const Resources = () => {
                       onClick={() => openVenueDetail(venue)}
                     >
                       <div className="w-32 flex-shrink-0 p-3">
-                        <p className="text-sm font-medium text-slate-700">
-                          {venue.name}
-                        </p>
+                        <p className="text-sm font-medium text-slate-700">{venue.name}</p>
                         <p className="text-xs text-slate-400 mt-0.5">
                           {venue.type} · {venue.capacity}人
                         </p>
                       </div>
                       <div className="flex-1 flex">
                         {weekDates.map((date) => (
-                          <div
-                            key={date}
-                            className="flex-1 p-2 relative h-12 border-l border-slate-100"
-                          >
+                          <div key={date} className="flex-1 p-2 relative h-12 border-l border-slate-100">
                             {getVenueSchedule(venue.id, date).map((app) => (
                               <div
                                 key={app.id}
-                                className="absolute top-2 bottom-2 bg-success-500/80 rounded text-white text-xs px-1.5 overflow-hidden whitespace-nowrap cursor-pointer hover:bg-success-600 transition-colors"
-                                style={getTimeSlotStyle(
-                                  app.startTime,
-                                  app.endTime
-                                )}
-                                title={`${app.activityName}\n${app.startTime}-${app.endTime}`}
+                                className={`absolute top-2 bottom-2 rounded text-white text-xs px-1.5 overflow-hidden whitespace-nowrap cursor-pointer hover:opacity-90 transition-opacity ${
+                                  app.status === "approved" ? "bg-success-500/80" : "bg-warning-500/80"
+                                }`}
+                                style={getTimeSlotStyle(app.startTime, app.endTime)}
+                                title={`${app.activityName}\n${app.startTime}-${app.endTime}\n${app.clubName}`}
                               >
                                 {app.activityName.slice(0, 4)}
                               </div>
                             ))}
-                            {getBlockedForVenue(venue.id, date).map(
-                              (blocked) => (
-                                <div
-                                  key={blocked.id}
-                                  className="absolute top-2 bottom-2 bg-danger-500/80 rounded text-white text-xs px-1.5 overflow-hidden whitespace-nowrap"
-                                  style={getTimeSlotStyle(
-                                    blocked.startTime,
-                                    blocked.endTime
-                                  )}
-                                  title={`封场：${blocked.reason}\n${blocked.startTime}-${blocked.endTime}`}
-                                >
-                                  封场
-                                </div>
-                              )
-                            )}
+                            {getBlockedForVenue(venue.id, date).map((blocked) => (
+                              <div
+                                key={blocked.id}
+                                className="absolute top-2 bottom-2 bg-danger-500/80 rounded text-white text-xs px-1.5 overflow-hidden whitespace-nowrap"
+                                style={getTimeSlotStyle(blocked.startTime, blocked.endTime)}
+                                title={`封场：${blocked.reason}\n${blocked.startTime}-${blocked.endTime}`}
+                              >
+                                封场
+                              </div>
+                            ))}
                           </div>
                         ))}
                       </div>
@@ -277,110 +282,121 @@ const Resources = () => {
           )}
 
           {activeTab === "equipment" && (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-slate-50 border-y border-slate-200">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                      设备名称
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                      分类
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                      总数
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                      可用
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                      库存状态
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                      存放位置
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                {weekNav}
+                <div className="flex items-center gap-4 text-xs text-slate-500">
+                  {legendApproved}
+                  {legendPending}
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <div className="min-w-[900px]">
+                  {renderWeekHeader()}
                   {equipmentList.map((eq) => (
-                    <tr key={eq.id} className="hover:bg-slate-50">
-                      <td className="px-6 py-4">
-                        <span className="text-sm font-medium text-slate-800">
-                          {eq.name}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4">
-                        <Badge variant="default">{eq.category}</Badge>
-                      </td>
-                      <td className="px-6 py-4 text-sm text-slate-600">
-                        {eq.totalQuantity} 件
-                      </td>
-                      <td className="px-6 py-4 text-sm text-slate-600">
-                        {eq.availableQuantity} 件
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-2">
-                          <div className="w-24 h-2 bg-slate-200 rounded-full overflow-hidden">
-                            <div
-                              className={`h-full rounded-full ${
-                                eq.availableQuantity / eq.totalQuantity > 0.5
-                                  ? "bg-success-500"
-                                  : eq.availableQuantity / eq.totalQuantity >
-                                    0.2
-                                  ? "bg-warning-500"
-                                  : "bg-danger-500"
-                              }`}
-                              style={{
-                                width: `${
-                                  (eq.availableQuantity / eq.totalQuantity) *
-                                  100
-                                }%`,
-                              }}
-                            />
-                          </div>
-                          <span className="text-xs text-slate-500">
-                            {Math.round(
-                              (eq.availableQuantity / eq.totalQuantity) * 100
-                            )}
-                            %
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-sm text-slate-600">
-                        {eq.location}
-                      </td>
-                    </tr>
+                    <div
+                      key={eq.id}
+                      className="flex border-b border-slate-100 hover:bg-slate-50"
+                    >
+                      <div className="w-32 flex-shrink-0 p-3">
+                        <p className="text-sm font-medium text-slate-700">{eq.name}</p>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          {eq.category} · {eq.totalQuantity}件
+                        </p>
+                      </div>
+                      <div className="flex-1 flex">
+                        {weekDates.map((date) => {
+                          const schedule = getEquipmentSchedule(eq.id, date);
+                          return (
+                            <div key={date} className="flex-1 p-2 relative h-12 border-l border-slate-100">
+                              {schedule.length === 0 && (
+                                <div className="absolute inset-2 flex items-center justify-center text-xs text-slate-300">
+                                  空
+                                </div>
+                              )}
+                              {schedule.map((app) => (
+                                <div
+                                  key={app.id}
+                                  className={`absolute top-2 bottom-2 rounded text-white text-xs px-1.5 overflow-hidden whitespace-nowrap cursor-pointer hover:opacity-90 transition-opacity ${
+                                    app.status === "approved" ? "bg-success-500/80" : "bg-warning-500/80"
+                                  }`}
+                                  style={getTimeSlotStyle(app.startTime, app.endTime)}
+                                  title={`${app.activityName}\n${app.startTime}-${app.endTime}\n${app.clubName} · ${app.venueName}`}
+                                >
+                                  {app.clubName.slice(0, 3)}
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
                   ))}
-                </tbody>
-              </table>
+                </div>
+              </div>
             </div>
           )}
 
           {activeTab === "teachers" && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {teachers.map((teacher) => (
-                <Card key={teacher.id} hoverable className="p-5">
-                  <div className="flex items-start gap-4">
-                    <div className="w-12 h-12 rounded-full bg-primary-100 flex items-center justify-center text-primary-700 font-bold text-lg">
-                      {teacher.name.charAt(0)}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                {weekNav}
+                <div className="flex items-center gap-4 text-xs text-slate-500">
+                  {legendApproved}
+                  {legendPending}
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <div className="min-w-[900px]">
+                  {renderWeekHeader()}
+                  {teachers.map((teacher) => (
+                    <div
+                      key={teacher.id}
+                      className="flex border-b border-slate-100 hover:bg-slate-50"
+                    >
+                      <div className="w-32 flex-shrink-0 p-3">
+                        <div className="flex items-center gap-2">
+                          <div className="w-7 h-7 rounded-full bg-primary-100 flex items-center justify-center text-primary-700 font-bold text-xs">
+                            {teacher.name.charAt(0)}
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium text-slate-700">{teacher.name}</p>
+                            <p className="text-xs text-slate-400">{teacher.expertise}</p>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex-1 flex">
+                        {weekDates.map((date) => {
+                          const schedule = getTeacherSchedule(teacher.id, date);
+                          return (
+                            <div key={date} className="flex-1 p-2 relative h-12 border-l border-slate-100">
+                              {schedule.length === 0 && (
+                                <div className="absolute inset-2 flex items-center justify-center text-xs text-slate-300">
+                                  空
+                                </div>
+                              )}
+                              {schedule.map((app) => (
+                                <div
+                                  key={app.id}
+                                  className={`absolute top-2 bottom-2 rounded text-white text-xs px-1.5 overflow-hidden whitespace-nowrap cursor-pointer hover:opacity-90 transition-opacity ${
+                                    app.status === "approved" ? "bg-success-500/80" : "bg-warning-500/80"
+                                  }`}
+                                  style={getTimeSlotStyle(app.startTime, app.endTime)}
+                                  title={`${app.activityName}\n${app.startTime}-${app.endTime}\n${app.clubName} · ${app.venueName}`}
+                                >
+                                  {app.activityName.slice(0, 4)}
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
-                    <div className="flex-1">
-                      <h4 className="font-semibold text-slate-800">
-                        {teacher.name}
-                      </h4>
-                      <p className="text-sm text-slate-500 mt-0.5">
-                        {teacher.department}
-                      </p>
-                      <Badge variant="primary" className="mt-2">
-                        {teacher.expertise}
-                      </Badge>
-                      <p className="text-xs text-slate-400 mt-2">
-                        {teacher.phone}
-                      </p>
-                    </div>
-                  </div>
-                </Card>
-              ))}
+                  ))}
+                </div>
+              </div>
             </div>
           )}
 

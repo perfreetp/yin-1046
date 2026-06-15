@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   CalendarCheck,
   Clock,
@@ -9,9 +9,11 @@ import {
   Plus,
   FileCheck,
   Users,
+  X,
 } from "lucide-react";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
+import Modal from "@/components/ui/Modal";
 import StatCard from "@/components/business/StatCard";
 import StatusBadge from "@/components/business/StatusBadge";
 import ActivityLevelBadge from "@/components/business/ActivityLevelBadge";
@@ -19,12 +21,83 @@ import ConflictBadge from "@/components/business/ConflictBadge";
 import { useStore } from "@/store/useStore";
 import { getDateLabel, formatDateDisplay } from "@/utils/dateUtils";
 import { sortApplications } from "@/utils/conflictUtils";
+import { ActivityLevel } from "@/types";
 
 const Dashboard = () => {
   const navigate = useNavigate();
   const applications = useStore((state) => state.applications);
   const conflicts = useStore((state) => state.conflicts);
   const venues = useStore((state) => state.venues);
+  const clubs = useStore((state) => state.clubs);
+  const equipmentList = useStore((state) => state.equipmentList);
+  const teachersList = useStore((state) => state.teachers);
+  const addApplication = useStore((state) => state.addApplication);
+
+  const [showNewAppModal, setShowNewAppModal] = useState(false);
+  const [form, setForm] = useState({
+    clubId: "",
+    activityName: "",
+    activityLevel: "daily" as ActivityLevel,
+    venueId: "",
+    date: new Date().toISOString().split("T")[0],
+    startTime: "09:00",
+    endTime: "11:00",
+    participantCount: 20,
+    equipmentIds: [] as string[],
+    teacherId: "",
+    remark: "",
+  });
+
+  const selectedClub = clubs.find((c) => c.id === form.clubId);
+  const selectedVenue = venues.find((v) => v.id === form.venueId);
+  const selectedTeacher = teachersList.find((t) => t.id === form.teacherId);
+  const selectedEquipments = equipmentList.filter((e) =>
+    form.equipmentIds.includes(e.id)
+  );
+
+  const handleSubmit = () => {
+    if (!form.clubId || !form.activityName || !form.venueId || !form.date) return;
+    addApplication({
+      clubId: form.clubId,
+      clubName: selectedClub?.name || "",
+      activityName: form.activityName,
+      activityLevel: form.activityLevel,
+      venueId: form.venueId,
+      venueName: selectedVenue?.name || "",
+      date: form.date,
+      startTime: form.startTime,
+      endTime: form.endTime,
+      participantCount: form.participantCount,
+      equipmentIds: form.equipmentIds,
+      equipmentNames: selectedEquipments.map((e) => e.name),
+      teacherId: form.teacherId,
+      teacherName: selectedTeacher?.name || "",
+      remark: form.remark,
+    });
+    setShowNewAppModal(false);
+    setForm({
+      clubId: "",
+      activityName: "",
+      activityLevel: "daily",
+      venueId: "",
+      date: new Date().toISOString().split("T")[0],
+      startTime: "09:00",
+      endTime: "11:00",
+      participantCount: 20,
+      equipmentIds: [],
+      teacherId: "",
+      remark: "",
+    });
+  };
+
+  const toggleEquipment = (eqId: string) => {
+    setForm((prev) => ({
+      ...prev,
+      equipmentIds: prev.equipmentIds.includes(eqId)
+        ? prev.equipmentIds.filter((id) => id !== eqId)
+        : [...prev.equipmentIds, eqId],
+    }));
+  };
 
   const todayApplications = useMemo(() => {
     const today = new Date().toISOString().split("T")[0];
@@ -64,7 +137,7 @@ const Dashboard = () => {
             {getDateLabel(new Date().toISOString().split("T")[0])} · 排练资源调度总览
           </p>
         </div>
-        <Button onClick={() => navigate("/approvals")}>
+        <Button onClick={() => setShowNewAppModal(true)}>
           <Plus className="w-4 h-4 mr-2" />
           新建申请
         </Button>
@@ -259,7 +332,7 @@ const Dashboard = () => {
                 <Button
                   variant="outline"
                   className="flex-col h-20"
-                  onClick={() => navigate("/approvals")}
+                  onClick={() => setShowNewAppModal(true)}
                 >
                   <Plus className="w-5 h-5 mb-1" />
                   <span className="text-xs">新建申请</span>
@@ -293,6 +366,195 @@ const Dashboard = () => {
           </Card>
         </div>
       </div>
+
+      <Modal
+        isOpen={showNewAppModal}
+        onClose={() => setShowNewAppModal(false)}
+        title="新建排练申请"
+        size="lg"
+      >
+        <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                申请社团 <span className="text-danger-500">*</span>
+              </label>
+              <select
+                value={form.clubId}
+                onChange={(e) => setForm({ ...form, clubId: e.target.value })}
+                className="w-full h-9 px-3 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
+              >
+                <option value="">请选择社团</option>
+                {clubs.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                活动级别 <span className="text-danger-500">*</span>
+              </label>
+              <select
+                value={form.activityLevel}
+                onChange={(e) => setForm({ ...form, activityLevel: e.target.value as ActivityLevel })}
+                className="w-full h-9 px-3 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
+              >
+                <option value="school_level">校级重点</option>
+                <option value="college_level">院级重点</option>
+                <option value="daily">日常排练</option>
+                <option value="temporary">临时活动</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">
+              活动名称 <span className="text-danger-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={form.activityName}
+              onChange={(e) => setForm({ ...form, activityName: e.target.value })}
+              placeholder="例如：校庆晚会舞蹈排练"
+              className="w-full h-9 px-3 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                场地 <span className="text-danger-500">*</span>
+              </label>
+              <select
+                value={form.venueId}
+                onChange={(e) => setForm({ ...form, venueId: e.target.value })}
+                className="w-full h-9 px-3 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
+              >
+                <option value="">请选择场地</option>
+                {venues.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.name}（容量{v.capacity}人）
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                参与人数
+              </label>
+              <input
+                type="number"
+                min={1}
+                value={form.participantCount}
+                onChange={(e) => setForm({ ...form, participantCount: parseInt(e.target.value) || 1 })}
+                className="w-full h-9 px-3 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                日期 <span className="text-danger-500">*</span>
+              </label>
+              <input
+                type="date"
+                value={form.date}
+                onChange={(e) => setForm({ ...form, date: e.target.value })}
+                className="w-full h-9 px-3 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                开始时间
+              </label>
+              <input
+                type="time"
+                value={form.startTime}
+                onChange={(e) => setForm({ ...form, startTime: e.target.value })}
+                className="w-full h-9 px-3 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                结束时间
+              </label>
+              <input
+                type="time"
+                value={form.endTime}
+                onChange={(e) => setForm({ ...form, endTime: e.target.value })}
+                className="w-full h-9 px-3 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">
+              指导老师
+            </label>
+            <select
+              value={form.teacherId}
+              onChange={(e) => setForm({ ...form, teacherId: e.target.value })}
+              className="w-full h-9 px-3 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
+            >
+              <option value="">无需指导老师</option>
+              {teachersList.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name} - {t.expertise}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">
+              需要设备（可多选）
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {equipmentList.map((eq) => (
+                <button
+                  key={eq.id}
+                  type="button"
+                  onClick={() => toggleEquipment(eq.id)}
+                  className={`px-3 py-1.5 rounded-lg text-sm border transition-colors ${
+                    form.equipmentIds.includes(eq.id)
+                      ? "bg-primary-50 border-primary-300 text-primary-700"
+                      : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"
+                  }`}
+                >
+                  {eq.name}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">
+              备注
+            </label>
+            <textarea
+              value={form.remark}
+              onChange={(e) => setForm({ ...form, remark: e.target.value })}
+              placeholder="补充说明..."
+              rows={2}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-300 resize-none"
+            />
+          </div>
+
+          <div className="flex justify-end gap-3 pt-2 border-t border-slate-100">
+            <Button variant="ghost" onClick={() => setShowNewAppModal(false)}>
+              取消
+            </Button>
+            <Button
+              onClick={handleSubmit}
+              disabled={!form.clubId || !form.activityName || !form.venueId || !form.date}
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              提交申请
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };

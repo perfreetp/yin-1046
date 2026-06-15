@@ -18,7 +18,71 @@ import {
   notifications as mockNotifications,
   blockedPeriods as mockBlockedPeriods,
 } from "@/data/applications";
-import { sortApplications } from "@/utils/conflictUtils";
+import { sortApplications, detectAllConflicts } from "@/utils/conflictUtils";
+
+const STORAGE_KEY = "rehearsal_platform_state";
+
+function loadPersistedState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        applications: parsed.applications || mockApplications,
+        conflicts: parsed.conflicts || mockConflicts,
+        notifications: parsed.notifications || mockNotifications,
+        blockedPeriods: parsed.blockedPeriods || mockBlockedPeriods,
+      };
+    }
+  } catch {}
+  return null;
+}
+
+function persistState(state: {
+  applications: RehearsalApplication[];
+  conflicts: Conflict[];
+  notifications: Notification[];
+  blockedPeriods: BlockedPeriod[];
+}) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch {}
+}
+
+const persisted = loadPersistedState();
+
+function addNotification(
+  notifications: Notification[],
+  type: "approval" | "rejection" | "reschedule" | "conflict" | "system",
+  recipientId: string,
+  recipientName: string,
+  title: string,
+  content: string,
+  relatedApplicationId?: string
+): Notification[] {
+  return [
+    ...notifications,
+    {
+      id: `n_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      recipientId,
+      recipientName,
+      type,
+      title,
+      content,
+      relatedApplicationId,
+      isRead: false,
+      createdAt: new Date().toISOString(),
+    },
+  ];
+}
+
+function recomputeConflicts(
+  applications: RehearsalApplication[],
+  venuesList: Venue[],
+  equipmentListData: Equipment[]
+): Conflict[] {
+  return detectAllConflicts(applications, venuesList, equipmentListData);
+}
 
 interface AppState {
   applications: RehearsalApplication[];
@@ -35,27 +99,13 @@ interface AppState {
     role: "admin" | "club" | "teacher";
   };
 
-  getApplicationsByStatus: (status: ApplicationStatus) => RehearsalApplication[];
-  getPendingApplications: () => RehearsalApplication[];
-  getTodayApplications: () => RehearsalApplication[];
-  getApplicationsByDate: (date: string) => RehearsalApplication[];
-  getApplicationsByVenue: (venueId: string) => RehearsalApplication[];
-  getApplicationById: (id: string) => RehearsalApplication | undefined;
-
+  addApplication: (app: Omit<RehearsalApplication, "id" | "createdAt" | "status" | "changeHistory">) => void;
   approveApplication: (id: string, approver: string) => void;
   rejectApplication: (id: string, reason: string, approver: string) => void;
-  rescheduleApplication: (
-    id: string,
-    suggestion: string,
-    approver: string
-  ) => void;
-  addApplication: (app: Omit<RehearsalApplication, "id" | "createdAt" | "status" | "changeHistory">) => void;
+  rescheduleApplication: (id: string, suggestion: string, approver: string) => void;
 
-  getPendingConflicts: () => Conflict[];
-  getConflictById: (id: string) => Conflict | undefined;
   resolveConflict: (id: string, resolver: string, resolution: string) => void;
 
-  getUnreadNotifications: () => Notification[];
   markNotificationRead: (id: string) => void;
   markAllNotificationsRead: () => void;
 
@@ -66,63 +116,62 @@ interface AppState {
 }
 
 export const useStore = create<AppState>((set, get) => ({
-  applications: mockApplications,
-  conflicts: mockConflicts,
-  notifications: mockNotifications,
+  applications: persisted?.applications ?? mockApplications,
+  conflicts: persisted?.conflicts ?? mockConflicts,
+  notifications: persisted?.notifications ?? mockNotifications,
   venues: venues,
   equipmentList: equipmentList,
   teachers: teachers,
   clubs: clubs,
-  blockedPeriods: mockBlockedPeriods,
+  blockedPeriods: persisted?.blockedPeriods ?? mockBlockedPeriods,
   currentUser: {
     id: "admin1",
     name: "场馆管理王老师",
     role: "admin",
   },
 
-  getApplicationsByStatus: (status) => {
-    return get().applications.filter((a) => a.status === status);
-  },
-
-  getPendingApplications: () => {
-    const pending = get().applications.filter((a) => a.status === "pending");
-    return sortApplications(pending);
-  },
-
-  getTodayApplications: () => {
-    const today = new Date().toISOString().split("T")[0];
-    return get()
-      .applications.filter((a) => a.date === today)
-      .sort((a, b) => a.startTime.localeCompare(b.startTime));
-  },
-
-  getApplicationsByDate: (date) => {
-    return get()
-      .applications.filter((a) => a.date === date)
-      .sort((a, b) => a.startTime.localeCompare(b.startTime));
-  },
-
-  getApplicationsByVenue: (venueId) => {
-    return get()
-      .applications.filter((a) => a.venueId === venueId)
-      .sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime));
-  },
-
-  getApplicationById: (id) => {
-    return get().applications.find((a) => a.id === id);
+  addApplication: (app) => {
+    const newApp: RehearsalApplication = {
+      ...app,
+      id: `app_${Date.now()}`,
+      status: "pending",
+      createdAt: new Date().toISOString(),
+      changeHistory: [
+        {
+          id: `ch_${Date.now()}`,
+          timestamp: new Date().toISOString(),
+          operator: app.clubName,
+          operatorRole: "社团负责人",
+          action: "提交申请",
+          reason: "新建排练申请",
+        },
+      ],
+    };
+    set((state) => {
+      const newApplications = [...state.applications, newApp];
+      const newConflicts = recomputeConflicts(newApplications, state.venues, state.equipmentList);
+      const newState = {
+        applications: newApplications,
+        conflicts: newConflicts,
+      };
+      persistState({ ...state, ...newState });
+      return newState;
+    });
   },
 
   approveApplication: (id, approver) => {
-    set((state) => ({
-      applications: state.applications.map((app) =>
-        app.id === id
+    set((state) => {
+      const app = state.applications.find((a) => a.id === id);
+      if (!app) return state;
+      const newApplications = state.applications.map((a) =>
+        a.id === id
           ? {
-              ...app,
+              ...a,
               status: "approved" as ApplicationStatus,
               approvedAt: new Date().toISOString(),
               approver,
               changeHistory: [
-                ...app.changeHistory,
+                ...a.changeHistory,
                 {
                   id: `ch_${Date.now()}`,
                   timestamp: new Date().toISOString(),
@@ -133,23 +182,42 @@ export const useStore = create<AppState>((set, get) => ({
                 },
               ],
             }
-          : app
-      ),
-    }));
+          : a
+      );
+      const newConflicts = recomputeConflicts(newApplications, state.venues, state.equipmentList);
+      const newNotifications = addNotification(
+        state.notifications,
+        "approval",
+        app.clubId,
+        app.clubName,
+        "排练申请已批准",
+        `您提交的「${app.activityName}」申请已通过审批。\n\n场地：${app.venueName}\n时间：${app.date} ${app.startTime}-${app.endTime}\n\n请按时到场排练，排练结束后及时关闭设备电源。`,
+        app.id
+      );
+      const newState = {
+        applications: newApplications,
+        conflicts: newConflicts,
+        notifications: newNotifications,
+      };
+      persistState({ ...state, ...newState });
+      return newState;
+    });
   },
 
   rejectApplication: (id, reason, approver) => {
-    set((state) => ({
-      applications: state.applications.map((app) =>
-        app.id === id
+    set((state) => {
+      const app = state.applications.find((a) => a.id === id);
+      if (!app) return state;
+      const newApplications = state.applications.map((a) =>
+        a.id === id
           ? {
-              ...app,
+              ...a,
               status: "rejected" as ApplicationStatus,
               approvedAt: new Date().toISOString(),
               approver,
               rejectReason: reason,
               changeHistory: [
-                ...app.changeHistory,
+                ...a.changeHistory,
                 {
                   id: `ch_${Date.now()}`,
                   timestamp: new Date().toISOString(),
@@ -160,23 +228,42 @@ export const useStore = create<AppState>((set, get) => ({
                 },
               ],
             }
-          : app
-      ),
-    }));
+          : a
+      );
+      const newConflicts = recomputeConflicts(newApplications, state.venues, state.equipmentList);
+      const newNotifications = addNotification(
+        state.notifications,
+        "rejection",
+        app.clubId,
+        app.clubName,
+        "排练申请已驳回",
+        `您提交的「${app.activityName}」申请已被驳回。\n\n原因：${reason}\n\n如有疑问，请联系场馆管理办公室。`,
+        app.id
+      );
+      const newState = {
+        applications: newApplications,
+        conflicts: newConflicts,
+        notifications: newNotifications,
+      };
+      persistState({ ...state, ...newState });
+      return newState;
+    });
   },
 
   rescheduleApplication: (id, suggestion, approver) => {
-    set((state) => ({
-      applications: state.applications.map((app) =>
-        app.id === id
+    set((state) => {
+      const app = state.applications.find((a) => a.id === id);
+      if (!app) return state;
+      const newApplications = state.applications.map((a) =>
+        a.id === id
           ? {
-              ...app,
+              ...a,
               status: "rescheduled" as ApplicationStatus,
               approvedAt: new Date().toISOString(),
               approver,
               rescheduleSuggestion: suggestion,
               changeHistory: [
-                ...app.changeHistory,
+                ...a.changeHistory,
                 {
                   id: `ch_${Date.now()}`,
                   timestamp: new Date().toISOString(),
@@ -187,64 +274,68 @@ export const useStore = create<AppState>((set, get) => ({
                 },
               ],
             }
-          : app
-      ),
-    }));
-  },
-
-  addApplication: (app) => {
-    const newApp: RehearsalApplication = {
-      ...app,
-      id: `app_${Date.now()}`,
-      status: "pending",
-      createdAt: new Date().toISOString(),
-      changeHistory: [],
-    };
-    set((state) => ({
-      applications: [...state.applications, newApp],
-    }));
-  },
-
-  getPendingConflicts: () => {
-    return get().conflicts.filter((c) => c.status === "pending");
-  },
-
-  getConflictById: (id) => {
-    return get().conflicts.find((c) => c.id === id);
+          : a
+      );
+      const newConflicts = recomputeConflicts(newApplications, state.venues, state.equipmentList);
+      const newNotifications = addNotification(
+        state.notifications,
+        "reschedule",
+        app.clubId,
+        app.clubName,
+        "排练申请建议改期",
+        `您提交的「${app.activityName}」申请建议改期。\n\n原因/建议：${suggestion}\n\n请登录系统确认或重新提交申请。`,
+        app.id
+      );
+      const newState = {
+        applications: newApplications,
+        conflicts: newConflicts,
+        notifications: newNotifications,
+      };
+      persistState({ ...state, ...newState });
+      return newState;
+    });
   },
 
   resolveConflict: (id, resolver, resolution) => {
-    set((state) => ({
-      conflicts: state.conflicts.map((c) =>
-        c.id === id
-          ? {
-              ...c,
-              status: "resolved",
-              resolvedAt: new Date().toISOString(),
-              resolver,
-              resolution,
-            }
-          : c
-      ),
-    }));
-  },
-
-  getUnreadNotifications: () => {
-    return get().notifications.filter((n) => !n.isRead);
+    set((state) => {
+      const newState = {
+        conflicts: state.conflicts.map((c) =>
+          c.id === id
+            ? {
+                ...c,
+                status: "resolved" as const,
+                resolvedAt: new Date().toISOString(),
+                resolver,
+                resolution,
+              }
+            : c
+        ),
+      };
+      persistState({ ...state, ...newState });
+      return newState;
+    });
   },
 
   markNotificationRead: (id) => {
-    set((state) => ({
-      notifications: state.notifications.map((n) =>
-        n.id === id ? { ...n, isRead: true } : n
-      ),
-    }));
+    set((state) => {
+      const newState = {
+        notifications: state.notifications.map((n) =>
+          n.id === id ? { ...n, isRead: true } : n
+        ),
+      };
+      persistState({ ...state, ...newState });
+      return newState;
+    });
   },
 
   markAllNotificationsRead: () => {
-    set((state) => ({
-      notifications: state.notifications.map((n) => ({ ...n, isRead: true })),
-    }));
+    set((state) => {
+      const newState = {
+        notifications: state.notifications.map((n) => ({ ...n, isRead: true })),
+      };
+      persistState({ ...state, ...newState });
+      return newState;
+    });
   },
 
   addBlockedPeriod: (period) => {
@@ -253,34 +344,46 @@ export const useStore = create<AppState>((set, get) => ({
       id: `b_${Date.now()}`,
       createdAt: new Date().toISOString(),
     };
-    set((state) => ({
-      blockedPeriods: [...state.blockedPeriods, newPeriod],
-    }));
+    set((state) => {
+      const newState = {
+        blockedPeriods: [...state.blockedPeriods, newPeriod],
+      };
+      persistState({ ...state, ...newState });
+      return newState;
+    });
   },
 
   removeBlockedPeriod: (id) => {
-    set((state) => ({
-      blockedPeriods: state.blockedPeriods.filter((p) => p.id !== id),
-    }));
+    set((state) => {
+      const newState = {
+        blockedPeriods: state.blockedPeriods.filter((p) => p.id !== id),
+      };
+      persistState({ ...state, ...newState });
+      return newState;
+    });
   },
 
   addChangeRecord: (appId, record) => {
-    set((state) => ({
-      applications: state.applications.map((app) =>
-        app.id === appId
-          ? {
-              ...app,
-              changeHistory: [
-                ...app.changeHistory,
-                {
-                  ...record,
-                  id: `ch_${Date.now()}`,
-                  timestamp: new Date().toISOString(),
-                },
-              ],
-            }
-          : app
-      ),
-    }));
+    set((state) => {
+      const newState = {
+        applications: state.applications.map((app) =>
+          app.id === appId
+            ? {
+                ...app,
+                changeHistory: [
+                  ...app.changeHistory,
+                  {
+                    ...record,
+                    id: `ch_${Date.now()}`,
+                    timestamp: new Date().toISOString(),
+                  },
+                ],
+              }
+            : app
+        ),
+      };
+      persistState({ ...state, ...newState });
+      return newState;
+    });
   },
 }));
