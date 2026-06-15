@@ -13,20 +13,32 @@ import {
   Check,
   X,
   ChevronRight,
+  ArrowRightLeft,
+  MapPin,
+  CalendarDays,
+  Wrench,
+  GraduationCap,
+  UserRound,
+  Star,
+  Lightbulb,
 } from "lucide-react";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
+import Badge from "@/components/ui/Badge";
 import ConflictBadge from "@/components/business/ConflictBadge";
 import StatusBadge from "@/components/business/StatusBadge";
+import ActivityLevelBadge from "@/components/business/ActivityLevelBadge";
 import {
   Conflict,
   ConflictType,
   ConflictSeverity,
   CONFLICT_TYPE_LABELS,
+  RehearsalApplication,
 } from "@/types";
 import { useStore } from "@/store/useStore";
 import { formatDateDisplay } from "@/utils/dateUtils";
+import { calculatePriorityScore } from "@/utils/conflictUtils";
 
 type FilterType = "all" | ConflictType;
 
@@ -34,6 +46,9 @@ const Conflicts = () => {
   const conflicts = useStore((state) => state.conflicts);
   const applications = useStore((state) => state.applications);
   const resolveConflict = useStore((state) => state.resolveConflict);
+  const approveApplication = useStore((state) => state.approveApplication);
+  const rejectApplication = useStore((state) => state.rejectApplication);
+  const rescheduleApplication = useStore((state) => state.rescheduleApplication);
   const currentUser = useStore((state) => state.currentUser);
 
   const [filterType, setFilterType] = useState<FilterType>("all");
@@ -80,6 +95,48 @@ const Conflicts = () => {
     return applications.filter((a) =>
       conflict.relatedApplicationIds.includes(a.id)
     );
+  };
+
+  const getRecommendedAction = (conflict: Conflict, apps: RehearsalApplication[]) => {
+    if (conflict.type === "time_overlap" || conflict.type === "teacher_conflict") {
+      if (apps.length >= 2) {
+        const scored = apps.map((a) => ({ app: a, score: calculatePriorityScore(a) }));
+        scored.sort((a, b) => b.score - a.score);
+        return {
+          type: conflict.type,
+          recommendations: scored.map((item, idx) => ({
+            app: item.app,
+            score: item.score,
+            action: idx === 0 ? "批准高优先级申请" : "建议改期",
+          })),
+        };
+      }
+    }
+    if (conflict.type === "capacity_exceeded") {
+      return {
+        type: conflict.type,
+        globalAction: "调整人数或更换更大场地",
+      };
+    }
+    if (conflict.type === "equipment_conflict") {
+      return {
+        type: conflict.type,
+        globalAction: "协调设备使用时段",
+      };
+    }
+    return { type: conflict.type };
+  };
+
+  const handleQuickApprove = (appId: string) => {
+    approveApplication(appId, currentUser.name);
+  };
+
+  const handleQuickReject = (appId: string) => {
+    rejectApplication(appId, "冲突处理-自动驳回", currentUser.name);
+  };
+
+  const handleQuickReschedule = (appId: string) => {
+    rescheduleApplication(appId, "冲突处理-建议改期调整", currentUser.name);
   };
 
   const conflictTypeFilters = [
@@ -266,115 +323,209 @@ const Conflicts = () => {
         title="冲突详情"
         size="lg"
       >
-        {selectedConflict && (
-          <div className="space-y-6">
-            <div className="flex items-center gap-3">
-              <div
-                className={`p-3 rounded-xl ${
-                  selectedConflict.severity === "high"
-                    ? "bg-danger-50 text-danger-600"
-                    : selectedConflict.severity === "medium"
-                    ? "bg-warning-50 text-warning-600"
-                    : "bg-primary-50 text-primary-600"
-                }`}
-              >
-                {(() => {
-                  const Icon = typeIcons[selectedConflict.type];
-                  return <Icon className="w-6 h-6" />;
-                })()}
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold text-slate-800">
-                  {CONFLICT_TYPE_LABELS[selectedConflict.type]}
-                </h3>
-                <div className="flex items-center gap-2 mt-1">
-                  <ConflictBadge severity={selectedConflict.severity} />
-                  <StatusBadge
-                    status={
-                      selectedConflict.status === "pending"
-                        ? "pending"
-                        : "approved"
-                    }
-                  />
+        {selectedConflict && (() => {
+          const relatedApps = getRelatedApplications(selectedConflict);
+          const recommendation = getRecommendedAction(selectedConflict, relatedApps);
+
+          return (
+            <div className="space-y-6">
+              <div className="flex items-center gap-3">
+                <div
+                  className={`p-3 rounded-xl ${
+                    selectedConflict.severity === "high"
+                      ? "bg-danger-50 text-danger-600"
+                      : selectedConflict.severity === "medium"
+                      ? "bg-warning-50 text-warning-600"
+                      : "bg-primary-50 text-primary-600"
+                  }`}
+                >
+                  {(() => {
+                    const Icon = typeIcons[selectedConflict.type];
+                    return <Icon className="w-6 h-6" />;
+                  })()}
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-800">
+                    {CONFLICT_TYPE_LABELS[selectedConflict.type]}
+                  </h3>
+                  <div className="flex items-center gap-2 mt-1">
+                    <ConflictBadge severity={selectedConflict.severity} size="sm" />
+                    <StatusBadge
+                      status={
+                        selectedConflict.status === "pending"
+                          ? "pending"
+                          : "approved"
+                      }
+                    />
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <div className="bg-slate-50 rounded-lg p-4">
-              <h4 className="text-sm font-medium text-slate-700 mb-2">
-                冲突描述
-              </h4>
-              <p className="text-slate-600 text-sm">
-                {selectedConflict.description}
-              </p>
-            </div>
+              <div className="bg-slate-50 rounded-lg p-4">
+                <h4 className="text-sm font-medium text-slate-700 mb-2">
+                  冲突描述
+                </h4>
+                <p className="text-slate-600 text-sm">
+                  {selectedConflict.description}
+                </p>
+              </div>
 
-            <div>
-              <h4 className="text-sm font-medium text-slate-700 mb-3">
-              涉及申请 ({selectedConflict.relatedApplicationIds.length})
-            </h4>
-              <div className="space-y-2">
-                {getRelatedApplications(selectedConflict).map((app) => (
-                  <div
-                    key={app.id}
-                    className="flex items-center justify-between p-3 bg-white rounded-lg border border-slate-200"
-                  >
-                    <div>
-                      <p className="text-sm font-medium text-slate-800">
-                        {app.activityName}
-                      </p>
-                      <p className="text-xs text-slate-500 mt-0.5">
-                        {app.clubName}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-xs text-slate-500">
-                        {formatDateDisplay(app.date)}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        {app.startTime} - {app.endTime}
-                      </p>
-                    </div>
+              <div>
+                <h4 className="text-sm font-medium text-slate-700 mb-3">
+                  涉及申请 ({relatedApps.length})
+                </h4>
+                <div className="space-y-3">
+                  {relatedApps.map((app) => {
+                    const priorityScore = calculatePriorityScore(app);
+                    return (
+                      <div
+                        key={app.id}
+                        className="bg-white rounded-lg border border-slate-200 overflow-hidden"
+                      >
+                        <div className="p-4">
+                          <div className="flex items-start justify-between mb-3">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-semibold text-slate-800">
+                                {app.activityName}
+                              </span>
+                              <ActivityLevelBadge level={app.activityLevel} />
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <StatusBadge status={app.status} />
+                              <div className="flex items-center gap-1 bg-amber-50 text-amber-700 px-2 py-0.5 rounded-md">
+                                <Star className="w-3.5 h-3.5" />
+                                <span className="text-xs font-semibold">{priorityScore}</span>
+                              </div>
+                            </div>
+                          </div>
+                          <p className="text-xs text-slate-500 mb-3">{app.clubName}</p>
+                          <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs text-slate-600">
+                            <div className="flex items-center gap-1.5">
+                              <MapPin className="w-3.5 h-3.5 text-slate-400" />
+                              <span>{app.venueName}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <CalendarDays className="w-3.5 h-3.5 text-slate-400" />
+                              <span>{formatDateDisplay(app.date)} {app.startTime}-{app.endTime}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <Wrench className="w-3.5 h-3.5 text-slate-400" />
+                              <span>{app.equipmentNames.length > 0 ? app.equipmentNames.join("、") : "无器材"}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <GraduationCap className="w-3.5 h-3.5 text-slate-400" />
+                              <span>{app.teacherName || "无指导老师"}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <UserRound className="w-3.5 h-3.5 text-slate-400" />
+                              <span>{app.participantCount} 人</span>
+                            </div>
+                          </div>
+                        </div>
+                        {selectedConflict.status === "pending" && app.status === "pending" && (
+                          <div className="flex border-t border-slate-100">
+                            <button
+                              onClick={() => handleQuickApprove(app.id)}
+                              className="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium text-success-600 hover:bg-success-50 transition-colors"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                              批准
+                            </button>
+                            <button
+                              onClick={() => handleQuickReject(app.id)}
+                              className="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium text-danger-600 hover:bg-danger-50 transition-colors border-x border-slate-100"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                              驳回
+                            </button>
+                            <button
+                              onClick={() => handleQuickReschedule(app.id)}
+                              className="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium text-primary-600 hover:bg-primary-50 transition-colors"
+                            >
+                              <ArrowRightLeft className="w-3.5 h-3.5" />
+                              改期
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {selectedConflict.status === "pending" && (
+                <div className="bg-primary-50 rounded-lg p-4 border border-primary-100">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Lightbulb className="w-4 h-4 text-primary-600" />
+                    <h4 className="text-sm font-medium text-primary-700">推荐处理</h4>
                   </div>
-                ))}
-              </div>
-            </div>
+                  {"recommendations" in recommendation && recommendation.recommendations ? (
+                    <div className="space-y-2">
+                      {recommendation.recommendations.map((rec) => (
+                        <div key={rec.app.id} className="flex items-center justify-between bg-white rounded-md px-3 py-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-slate-700 font-medium">{rec.app.activityName}</span>
+                            <Badge variant="warning">
+                              <Star className="w-3 h-3 mr-0.5" />{rec.score}分
+                            </Badge>
+                          </div>
+                          <span className={`text-xs font-medium ${rec.action === "批准高优先级申请" ? "text-success-600" : "text-primary-600"}`}>
+                            {rec.action}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : "globalAction" in recommendation && recommendation.globalAction ? (
+                    <p className="text-sm text-primary-700">{recommendation.globalAction}</p>
+                  ) : null}
+                </div>
+              )}
 
-            {selectedConflict.status === "resolved" && (
-              <div className="bg-success-50 rounded-lg p-4 border border-success-100">
-              <h4 className="text-sm font-medium text-success-700 mb-2">
-                解决方案
-              </h4>
-              <p className="text-success-600 text-sm">
-                {selectedConflict.resolution}
-              </p>
-              <p className="text-xs text-success-500 mt-2">
-                处理人：{selectedConflict.resolver}
-              </p>
-            </div>
-          )}
+              {selectedConflict.status === "resolved" && (
+                <div className="bg-success-50 rounded-lg p-4 border border-success-100 space-y-3">
+                  <h4 className="text-sm font-medium text-success-700">
+                    解决方案
+                  </h4>
+                  <p className="text-success-600 text-sm">
+                    {selectedConflict.resolution}
+                  </p>
+                  <div className="flex items-center gap-4 text-xs text-success-500 pt-1 border-t border-success-100">
+                    <span className="flex items-center gap-1">
+                      <UserCheck className="w-3.5 h-3.5" />
+                      处理人：{selectedConflict.resolver}
+                    </span>
+                    {selectedConflict.resolvedAt && (
+                      <span className="flex items-center gap-1">
+                        <Clock3 className="w-3.5 h-3.5" />
+                        处理时间：{formatDateDisplay(selectedConflict.resolvedAt)} {new Date(selectedConflict.resolvedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
 
-            {selectedConflict.status === "pending" && (
-              <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
-                <Button
-                  variant="outline"
-                  onClick={() => setShowDetail(false)}
-                >
-                  忽略
-                </Button>
-                <Button
-                  onClick={() => {
-                    setSelectedConflict(selectedConflict);
-                    setShowResolveModal(true);
-                  }}
-                >
-                  <Check className="w-4 h-4 mr-2" />
-                  标记已解决
-                </Button>
-              </div>
-            )}
-          </div>
-        )}
+              {selectedConflict.status === "pending" && (
+                <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowDetail(false)}
+                  >
+                    忽略
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      setSelectedConflict(selectedConflict);
+                      setShowResolveModal(true);
+                    }}
+                  >
+                    <Check className="w-4 h-4 mr-2" />
+                    标记已解决
+                  </Button>
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </Modal>
 
       <Modal

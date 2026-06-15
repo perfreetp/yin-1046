@@ -17,15 +17,23 @@ import {
   notifications as mockNotifications,
   blockedPeriods as mockBlockedPeriods,
 } from "@/data/applications";
-import { sortApplications, detectAllConflicts } from "@/utils/conflictUtils";
+import { detectAllConflicts } from "@/utils/conflictUtils";
 
 const STORAGE_KEY = "rehearsal_platform_state";
+
+interface ResolvedConflictRecord {
+  signature: string;
+  resolver: string;
+  resolution: string;
+  resolvedAt: string;
+}
 
 interface PersistedData {
   applications: RehearsalApplication[];
   notifications: Notification[];
   blockedPeriods: BlockedPeriod[];
   resolvedSignatures: string[];
+  resolvedConflictRecords: ResolvedConflictRecord[];
 }
 
 function loadPersistedState(): PersistedData | null {
@@ -38,6 +46,7 @@ function loadPersistedState(): PersistedData | null {
         notifications: parsed.notifications || mockNotifications,
         blockedPeriods: parsed.blockedPeriods || mockBlockedPeriods,
         resolvedSignatures: parsed.resolvedSignatures || [],
+        resolvedConflictRecords: parsed.resolvedConflictRecords || [],
       };
     }
   } catch {
@@ -58,13 +67,28 @@ const persisted = loadPersistedState();
 
 const initialApplications = persisted?.applications ?? mockApplications;
 const initialResolvedSignatures = new Set(persisted?.resolvedSignatures ?? []);
+const initialResolvedRecords = new Map<string, ResolvedConflictRecord>();
+(persisted?.resolvedConflictRecords ?? []).forEach((r: ResolvedConflictRecord) => {
+  initialResolvedRecords.set(r.signature, r);
+});
+
 const initialConflicts = detectAllConflicts(
   initialApplications,
   venues,
   equipmentList
-).map((c) =>
-  initialResolvedSignatures.has(c.signature) ? { ...c, status: "resolved" as const } : c
-);
+).map((c) => {
+  if (initialResolvedSignatures.has(c.signature)) {
+    const record = initialResolvedRecords.get(c.signature);
+    return {
+      ...c,
+      status: "resolved" as const,
+      resolver: record?.resolver || "",
+      resolution: record?.resolution || "",
+      resolvedAt: record?.resolvedAt || "",
+    };
+  }
+  return c;
+});
 
 function addNotification(
   notifications: Notification[],
@@ -95,13 +119,23 @@ function buildConflicts(
   applications: RehearsalApplication[],
   venuesList: Venue[],
   equipmentListData: Equipment[],
-  resolvedSigs: Set<string>
+  resolvedSigs: Set<string>,
+  resolvedRecords: Map<string, ResolvedConflictRecord>
 ): Conflict[] {
   return detectAllConflicts(applications, venuesList, equipmentListData).map(
-    (c) =>
-      resolvedSigs.has(c.signature)
-        ? { ...c, status: "resolved" as const }
-        : c
+    (c) => {
+      if (resolvedSigs.has(c.signature)) {
+        const record = resolvedRecords.get(c.signature);
+        return {
+          ...c,
+          status: "resolved" as const,
+          resolver: record?.resolver || "",
+          resolution: record?.resolution || "",
+          resolvedAt: record?.resolvedAt || "",
+        };
+      }
+      return c;
+    }
   );
 }
 
@@ -115,6 +149,7 @@ interface AppState {
   clubs: Club[];
   blockedPeriods: BlockedPeriod[];
   resolvedSignatures: Set<string>;
+  resolvedConflictRecords: Map<string, ResolvedConflictRecord>;
   currentUser: {
     id: string;
     name: string;
@@ -122,27 +157,30 @@ interface AppState {
   };
 
   addApplication: (
-    app: Omit<
-      RehearsalApplication,
-      "id" | "createdAt" | "status" | "changeHistory"
-    >
+    app: Omit<RehearsalApplication, "id" | "createdAt" | "status" | "changeHistory">
   ) => void;
   approveApplication: (id: string, approver: string) => void;
   rejectApplication: (id: string, reason: string, approver: string) => void;
   rescheduleApplication: (id: string, suggestion: string, approver: string) => void;
-
   resolveConflict: (id: string, resolver: string, resolution: string) => void;
-
   markNotificationRead: (id: string) => void;
   markAllNotificationsRead: () => void;
-
   addBlockedPeriod: (period: Omit<BlockedPeriod, "id" | "createdAt">) => void;
   removeBlockedPeriod: (id: string) => void;
+  addChangeRecord: (appId: string, record: Omit<ChangeRecord, "id" | "timestamp">) => void;
+}
 
-  addChangeRecord: (
-    appId: string,
-    record: Omit<ChangeRecord, "id" | "timestamp">
-  ) => void;
+function doPersist(
+  state: AppState & { resolvedConflictRecords: Map<string, ResolvedConflictRecord> }
+) {
+  const data: PersistedData = {
+    applications: state.applications,
+    notifications: state.notifications,
+    blockedPeriods: state.blockedPeriods,
+    resolvedSignatures: Array.from(state.resolvedSignatures),
+    resolvedConflictRecords: Array.from(state.resolvedConflictRecords.values()),
+  };
+  persistState(data);
 }
 
 export const useStore = create<AppState>((set, get) => ({
@@ -155,6 +193,7 @@ export const useStore = create<AppState>((set, get) => ({
   clubs: clubs,
   blockedPeriods: persisted?.blockedPeriods ?? mockBlockedPeriods,
   resolvedSignatures: initialResolvedSignatures,
+  resolvedConflictRecords: initialResolvedRecords,
   currentUser: {
     id: "admin1",
     name: "场馆管理王老师",
@@ -181,22 +220,12 @@ export const useStore = create<AppState>((set, get) => ({
     set((state) => {
       const newApplications = [...state.applications, newApp];
       const newConflicts = buildConflicts(
-        newApplications,
-        state.venues,
-        state.equipmentList,
-        state.resolvedSignatures
+        newApplications, state.venues, state.equipmentList,
+        state.resolvedSignatures, state.resolvedConflictRecords
       );
-      const data: PersistedData = {
-        applications: newApplications,
-        notifications: state.notifications,
-        blockedPeriods: state.blockedPeriods,
-        resolvedSignatures: Array.from(state.resolvedSignatures),
-      };
-      persistState(data);
-      return {
-        applications: newApplications,
-        conflicts: newConflicts,
-      };
+      const s = { ...state, applications: newApplications, conflicts: newConflicts };
+      doPersist(s as any);
+      return { applications: newApplications, conflicts: newConflicts };
     });
   },
 
@@ -226,32 +255,18 @@ export const useStore = create<AppState>((set, get) => ({
           : a
       );
       const newConflicts = buildConflicts(
-        newApplications,
-        state.venues,
-        state.equipmentList,
-        state.resolvedSignatures
+        newApplications, state.venues, state.equipmentList,
+        state.resolvedSignatures, state.resolvedConflictRecords
       );
       const newNotifications = addNotification(
-        state.notifications,
-        "approval",
-        app.clubId,
-        app.clubName,
+        state.notifications, "approval", app.clubId, app.clubName,
         "排练申请已批准",
         `您提交的「${app.activityName}」申请已通过审批。\n\n场地：${app.venueName}\n时间：${app.date} ${app.startTime}-${app.endTime}\n\n请按时到场排练，排练结束后及时关闭设备电源。`,
         app.id
       );
-      const data: PersistedData = {
-        applications: newApplications,
-        notifications: newNotifications,
-        blockedPeriods: state.blockedPeriods,
-        resolvedSignatures: Array.from(state.resolvedSignatures),
-      };
-      persistState(data);
-      return {
-        applications: newApplications,
-        conflicts: newConflicts,
-        notifications: newNotifications,
-      };
+      const s = { ...state, applications: newApplications, conflicts: newConflicts, notifications: newNotifications };
+      doPersist(s as any);
+      return { applications: newApplications, conflicts: newConflicts, notifications: newNotifications };
     });
   },
 
@@ -282,32 +297,18 @@ export const useStore = create<AppState>((set, get) => ({
           : a
       );
       const newConflicts = buildConflicts(
-        newApplications,
-        state.venues,
-        state.equipmentList,
-        state.resolvedSignatures
+        newApplications, state.venues, state.equipmentList,
+        state.resolvedSignatures, state.resolvedConflictRecords
       );
       const newNotifications = addNotification(
-        state.notifications,
-        "rejection",
-        app.clubId,
-        app.clubName,
+        state.notifications, "rejection", app.clubId, app.clubName,
         "排练申请已驳回",
         `您提交的「${app.activityName}」申请已被驳回。\n\n原因：${reason}\n\n如有疑问，请联系场馆管理办公室。`,
         app.id
       );
-      const data: PersistedData = {
-        applications: newApplications,
-        notifications: newNotifications,
-        blockedPeriods: state.blockedPeriods,
-        resolvedSignatures: Array.from(state.resolvedSignatures),
-      };
-      persistState(data);
-      return {
-        applications: newApplications,
-        conflicts: newConflicts,
-        notifications: newNotifications,
-      };
+      const s = { ...state, applications: newApplications, conflicts: newConflicts, notifications: newNotifications };
+      doPersist(s as any);
+      return { applications: newApplications, conflicts: newConflicts, notifications: newNotifications };
     });
   },
 
@@ -338,32 +339,18 @@ export const useStore = create<AppState>((set, get) => ({
           : a
       );
       const newConflicts = buildConflicts(
-        newApplications,
-        state.venues,
-        state.equipmentList,
-        state.resolvedSignatures
+        newApplications, state.venues, state.equipmentList,
+        state.resolvedSignatures, state.resolvedConflictRecords
       );
       const newNotifications = addNotification(
-        state.notifications,
-        "reschedule",
-        app.clubId,
-        app.clubName,
+        state.notifications, "reschedule", app.clubId, app.clubName,
         "排练申请建议改期",
         `您提交的「${app.activityName}」申请建议改期。\n\n原因/建议：${suggestion}\n\n请登录系统确认或重新提交申请。`,
         app.id
       );
-      const data: PersistedData = {
-        applications: newApplications,
-        notifications: newNotifications,
-        blockedPeriods: state.blockedPeriods,
-        resolvedSignatures: Array.from(state.resolvedSignatures),
-      };
-      persistState(data);
-      return {
-        applications: newApplications,
-        conflicts: newConflicts,
-        notifications: newNotifications,
-      };
+      const s = { ...state, applications: newApplications, conflicts: newConflicts, notifications: newNotifications };
+      doPersist(s as any);
+      return { applications: newApplications, conflicts: newConflicts, notifications: newNotifications };
     });
   },
 
@@ -373,28 +360,22 @@ export const useStore = create<AppState>((set, get) => ({
       if (!conflict) return state;
       const newResolvedSigs = new Set(state.resolvedSignatures);
       newResolvedSigs.add(conflict.signature);
+      const newResolvedRecords = new Map(state.resolvedConflictRecords);
+      const now = new Date().toISOString();
+      newResolvedRecords.set(conflict.signature, {
+        signature: conflict.signature,
+        resolver,
+        resolution,
+        resolvedAt: now,
+      });
       const newConflicts = state.conflicts.map((c) =>
         c.id === id
-          ? {
-              ...c,
-              status: "resolved" as const,
-              resolvedAt: new Date().toISOString(),
-              resolver,
-              resolution,
-            }
+          ? { ...c, status: "resolved" as const, resolvedAt: now, resolver, resolution }
           : c
       );
-      const data: PersistedData = {
-        applications: state.applications,
-        notifications: state.notifications,
-        blockedPeriods: state.blockedPeriods,
-        resolvedSignatures: Array.from(newResolvedSigs),
-      };
-      persistState(data);
-      return {
-        conflicts: newConflicts,
-        resolvedSignatures: newResolvedSigs,
-      };
+      const s = { ...state, conflicts: newConflicts, resolvedSignatures: newResolvedSigs, resolvedConflictRecords: newResolvedRecords };
+      doPersist(s as any);
+      return { conflicts: newConflicts, resolvedSignatures: newResolvedSigs, resolvedConflictRecords: newResolvedRecords };
     });
   },
 
@@ -403,30 +384,17 @@ export const useStore = create<AppState>((set, get) => ({
       const newNotifications = state.notifications.map((n) =>
         n.id === id ? { ...n, isRead: true } : n
       );
-      const data: PersistedData = {
-        applications: state.applications,
-        notifications: newNotifications,
-        blockedPeriods: state.blockedPeriods,
-        resolvedSignatures: Array.from(state.resolvedSignatures),
-      };
-      persistState(data);
+      const s = { ...state, notifications: newNotifications };
+      doPersist(s as any);
       return { notifications: newNotifications };
     });
   },
 
   markAllNotificationsRead: () => {
     set((state) => {
-      const newNotifications = state.notifications.map((n) => ({
-        ...n,
-        isRead: true,
-      }));
-      const data: PersistedData = {
-        applications: state.applications,
-        notifications: newNotifications,
-        blockedPeriods: state.blockedPeriods,
-        resolvedSignatures: Array.from(state.resolvedSignatures),
-      };
-      persistState(data);
+      const newNotifications = state.notifications.map((n) => ({ ...n, isRead: true }));
+      const s = { ...state, notifications: newNotifications };
+      doPersist(s as any);
       return { notifications: newNotifications };
     });
   },
@@ -439,29 +407,17 @@ export const useStore = create<AppState>((set, get) => ({
     };
     set((state) => {
       const newBlockedPeriods = [...state.blockedPeriods, newPeriod];
-      const data: PersistedData = {
-        applications: state.applications,
-        notifications: state.notifications,
-        blockedPeriods: newBlockedPeriods,
-        resolvedSignatures: Array.from(state.resolvedSignatures),
-      };
-      persistState(data);
+      const s = { ...state, blockedPeriods: newBlockedPeriods };
+      doPersist(s as any);
       return { blockedPeriods: newBlockedPeriods };
     });
   },
 
   removeBlockedPeriod: (id) => {
     set((state) => {
-      const newBlockedPeriods = state.blockedPeriods.filter(
-        (p) => p.id !== id
-      );
-      const data: PersistedData = {
-        applications: state.applications,
-        notifications: state.notifications,
-        blockedPeriods: newBlockedPeriods,
-        resolvedSignatures: Array.from(state.resolvedSignatures),
-      };
-      persistState(data);
+      const newBlockedPeriods = state.blockedPeriods.filter((p) => p.id !== id);
+      const s = { ...state, blockedPeriods: newBlockedPeriods };
+      doPersist(s as any);
       return { blockedPeriods: newBlockedPeriods };
     });
   },
@@ -474,22 +430,13 @@ export const useStore = create<AppState>((set, get) => ({
               ...app,
               changeHistory: [
                 ...app.changeHistory,
-                {
-                  ...record,
-                  id: `ch_${Date.now()}`,
-                  timestamp: new Date().toISOString(),
-                },
+                { ...record, id: `ch_${Date.now()}`, timestamp: new Date().toISOString() },
               ],
             }
           : app
       );
-      const data: PersistedData = {
-        applications: newApplications,
-        notifications: state.notifications,
-        blockedPeriods: state.blockedPeriods,
-        resolvedSignatures: Array.from(state.resolvedSignatures),
-      };
-      persistState(data);
+      const s = { ...state, applications: newApplications };
+      doPersist(s as any);
       return { applications: newApplications };
     });
   },

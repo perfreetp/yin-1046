@@ -13,6 +13,7 @@ import {
   History,
   ArrowRightLeft,
   Clock,
+  AlertTriangle,
 } from "lucide-react";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
@@ -25,9 +26,13 @@ import {
   RehearsalApplication,
   ApplicationStatus,
   ActivityLevel,
+  CONFLICT_TYPE_LABELS,
+  Conflict,
 } from "@/types";
 import { formatDateDisplay, getWeekdayName } from "@/utils/dateUtils";
 import { calculatePriorityScore } from "@/utils/conflictUtils";
+
+type PendingAction = "approve" | "reject" | "reschedule";
 
 const Approvals = () => {
   const applications = useStore((state) => state.applications);
@@ -56,6 +61,10 @@ const Approvals = () => {
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rescheduleSuggestion, setRescheduleSuggestion] = useState("");
   const [showRescheduleModal, setShowRescheduleModal] = useState(false);
+  const [showConflictConfirm, setShowConflictConfirm] = useState(false);
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(
+    null
+  );
 
   const sortedApps = [...applications]
     .filter((app) => app.status === filterStatus)
@@ -76,9 +85,40 @@ const Approvals = () => {
     }))
     .sort((a, b) => (b.priorityScore || 0) - (a.priorityScore || 0));
 
+  const getConflictsForApp = (appId: string): Conflict[] => {
+    return pendingConflicts.filter((c) =>
+      c.relatedApplicationIds.includes(appId)
+    );
+  };
+
+  const hasConflict = (appId: string) => {
+    return getConflictsForApp(appId).length > 0;
+  };
+
+  const executePendingAction = () => {
+    if (!selectedApp || !pendingAction) return;
+    setShowConflictConfirm(false);
+    if (pendingAction === "approve") {
+      approveApplication(selectedApp.id, currentUser.name);
+      setShowDetail(false);
+    } else if (pendingAction === "reject") {
+      setShowRejectModal(true);
+    } else if (pendingAction === "reschedule") {
+      setShowRescheduleModal(true);
+    }
+    setPendingAction(null);
+  };
+
   const handleApprove = (app: RehearsalApplication) => {
-    approveApplication(app.id, currentUser.name);
-    setShowDetail(false);
+    const appConflicts = getConflictsForApp(app.id);
+    setSelectedApp(app);
+    if (appConflicts.length > 0) {
+      setPendingAction("approve");
+      setShowConflictConfirm(true);
+    } else {
+      approveApplication(app.id, currentUser.name);
+      setShowDetail(false);
+    }
   };
 
   const handleReject = () => {
@@ -108,16 +148,19 @@ const Approvals = () => {
     setShowDetail(true);
   };
 
-  const hasConflict = (appId: string) => {
-    return pendingConflicts.some((c) =>
-      c.relatedApplicationIds.includes(appId)
-    );
-  };
-
-  const getConflictForApp = (appId: string) => {
-    return pendingConflicts.find((c) =>
-      c.relatedApplicationIds.includes(appId)
-    );
+  const initiateAction = (app: RehearsalApplication, action: PendingAction) => {
+    const appConflicts = getConflictsForApp(app.id);
+    setSelectedApp(app);
+    if (appConflicts.length > 0) {
+      setPendingAction(action);
+      setShowConflictConfirm(true);
+    } else {
+      if (action === "reject") {
+        setShowRejectModal(true);
+      } else if (action === "reschedule") {
+        setShowRescheduleModal(true);
+      }
+    }
   };
 
   return (
@@ -230,7 +273,7 @@ const Approvals = () => {
                       {hasConflict(app.id) && (
                         <ConflictBadge
                           severity={
-                            getConflictForApp(app.id)?.severity || "low"
+                            getConflictsForApp(app.id)[0]?.severity || "low"
                           }
                           size="sm"
                           pulse
@@ -298,8 +341,7 @@ const Approvals = () => {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            setSelectedApp(app);
-                            setShowRejectModal(true);
+                            initiateAction(app, "reject");
                           }}
                           className="p-1.5 text-danger-600 hover:bg-danger-50 rounded-lg transition-colors"
                           title="驳回"
@@ -309,8 +351,7 @@ const Approvals = () => {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            setSelectedApp(app);
-                            setShowRescheduleModal(true);
+                            initiateAction(app, "reschedule");
                           }}
                           className="p-1.5 text-warning-600 hover:bg-warning-50 rounded-lg transition-colors"
                           title="建议改期"
@@ -346,6 +387,34 @@ const Approvals = () => {
       >
         {selectedApp && (
           <div className="space-y-6">
+            {(() => {
+              const detailConflicts = getConflictsForApp(selectedApp.id);
+              return detailConflicts.length > 0 ? (
+                <div className="bg-warning-50 rounded-lg p-4 border border-warning-200">
+                  <div className="flex items-center gap-2 text-warning-700 font-medium mb-3">
+                    <AlertTriangle className="w-5 h-5" />
+                    冲突信息
+                  </div>
+                  <div className="space-y-3">
+                    {detailConflicts.map((c) => (
+                      <div
+                        key={c.id}
+                        className="bg-white rounded-lg p-3 border border-warning-100"
+                      >
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-sm font-medium text-slate-700">
+                            {CONFLICT_TYPE_LABELS[c.type]}
+                          </span>
+                          <ConflictBadge severity={c.severity} size="sm" />
+                        </div>
+                        <p className="text-sm text-slate-600">{c.description}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null;
+            })()}
+
             <div>
               <h3 className="text-lg font-semibold text-slate-800 mb-2">
                 {selectedApp.activityName}
@@ -356,7 +425,7 @@ const Approvals = () => {
                 {hasConflict(selectedApp.id) && (
                   <ConflictBadge
                     severity={
-                      getConflictForApp(selectedApp.id)?.severity || "low"
+                      getConflictsForApp(selectedApp.id)[0]?.severity || "low"
                     }
                     pulse
                   />
@@ -509,20 +578,14 @@ const Approvals = () => {
               <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
                 <Button
                   variant="outline"
-                  onClick={() => {
-                    setSelectedApp(selectedApp);
-                    setShowRescheduleModal(true);
-                  }}
+                  onClick={() => initiateAction(selectedApp, "reschedule")}
                 >
                   <ArrowRightLeft className="w-4 h-4 mr-2" />
                   建议改期
                 </Button>
                 <Button
                   variant="danger"
-                  onClick={() => {
-                    setSelectedApp(selectedApp);
-                    setShowRejectModal(true);
-                  }}
+                  onClick={() => initiateAction(selectedApp, "reject")}
                 >
                   <X className="w-4 h-4 mr-2" />
                   驳回
@@ -533,6 +596,55 @@ const Approvals = () => {
                 </Button>
               </div>
             )}
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        isOpen={showConflictConfirm && !!selectedApp}
+        onClose={() => {
+          setShowConflictConfirm(false);
+          setPendingAction(null);
+        }}
+        title="冲突确认"
+        size="md"
+      >
+        {selectedApp && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 text-warning-700 font-medium">
+              <AlertTriangle className="w-5 h-5" />
+              该申请存在以下冲突
+            </div>
+            <div className="space-y-3">
+              {getConflictsForApp(selectedApp.id).map((c) => (
+                <div
+                  key={c.id}
+                  className="bg-warning-50 rounded-lg p-3 border border-warning-200"
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-sm font-medium text-slate-700">
+                      {CONFLICT_TYPE_LABELS[c.type]}
+                    </span>
+                    <ConflictBadge severity={c.severity} size="sm" />
+                  </div>
+                  <p className="text-sm text-slate-600">{c.description}</p>
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-end gap-3 pt-2">
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setShowConflictConfirm(false);
+                  setPendingAction(null);
+                }}
+              >
+                取消
+              </Button>
+              <Button onClick={executePendingAction}>
+                仍然继续
+              </Button>
+            </div>
           </div>
         )}
       </Modal>

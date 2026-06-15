@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import {
   Building2,
   Package,
@@ -11,11 +11,16 @@ import {
   Trash2,
   ChevronLeft,
   ChevronRight,
+  AlertTriangle,
+  Music,
+  User,
 } from "lucide-react";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
 import Badge from "@/components/ui/Badge";
+import StatusBadge from "@/components/business/StatusBadge";
+import ActivityLevelBadge from "@/components/business/ActivityLevelBadge";
 import { useStore } from "@/store/useStore";
 import {
   getWeekDates,
@@ -23,7 +28,8 @@ import {
   getWeekdayName,
   parseTime,
 } from "@/utils/dateUtils";
-import { Venue, Equipment, Teacher, BlockedPeriod } from "@/types";
+import { calculatePriorityScore } from "@/utils/conflictUtils";
+import { Venue, Equipment, Teacher, BlockedPeriod, RehearsalApplication } from "@/types";
 
 type TabType = "venues" | "equipment" | "teachers" | "blocked";
 
@@ -33,6 +39,7 @@ const Resources = () => {
   const teachers = useStore((state) => state.teachers);
   const blockedPeriods = useStore((state) => state.blockedPeriods);
   const applications = useStore((state) => state.applications);
+  const conflicts = useStore((state) => state.conflicts);
   const removeBlockedPeriod = useStore(
     (state) => state.removeBlockedPeriod
   );
@@ -43,6 +50,8 @@ const Resources = () => {
   const [selectedVenue, setSelectedVenue] = useState<Venue | null>(null);
   const [showVenueDetail, setShowVenueDetail] = useState(false);
   const [showBlockedModal, setShowBlockedModal] = useState(false);
+  const [selectedApp, setSelectedApp] = useState<RehearsalApplication | null>(null);
+  const [showAppDetail, setShowAppDetail] = useState(false);
   const [weekOffset, setWeekOffset] = useState(0);
   const [newBlocked, setNewBlocked] = useState({
     venueId: "",
@@ -51,6 +60,16 @@ const Resources = () => {
     endTime: "22:00",
     reason: "",
   });
+
+  const conflictAppIds = useMemo(() => {
+    const ids = new Set<string>();
+    conflicts.forEach((c) => {
+      if (c.status === "pending") {
+        c.relatedApplicationIds.forEach((id) => ids.add(id));
+      }
+    });
+    return ids;
+  }, [conflicts]);
 
   const baseDate = new Date();
   baseDate.setDate(baseDate.getDate() + weekOffset * 7);
@@ -106,6 +125,11 @@ const Resources = () => {
     setShowVenueDetail(true);
   };
 
+  const openAppDetail = (app: RehearsalApplication) => {
+    setSelectedApp(app);
+    setShowAppDetail(true);
+  };
+
   const handleAddBlocked = () => {
     if (newBlocked.venueId && newBlocked.date && newBlocked.reason) {
       const venue = venues.find((v) => v.id === newBlocked.venueId);
@@ -127,6 +151,19 @@ const Resources = () => {
         reason: "",
       });
     }
+  };
+
+  const getBlockClassName = (app: RehearsalApplication) => {
+    const isConflict = conflictAppIds.has(app.id);
+    const base = "absolute top-2 bottom-2 rounded text-white text-xs px-1.5 overflow-hidden whitespace-nowrap cursor-pointer hover:opacity-90 transition-opacity";
+    if (app.status === "approved") {
+      return isConflict
+        ? `${base} bg-success-500/80 ring-2 ring-danger-400`
+        : `${base} bg-success-500/80`;
+    }
+    return isConflict
+      ? `${base} bg-warning-500/80 ring-2 ring-danger-400`
+      : `${base} bg-warning-500/80`;
   };
 
   const weekNav = (
@@ -159,6 +196,12 @@ const Resources = () => {
     <span className="flex items-center gap-1">
       <span className="w-3 h-3 rounded bg-warning-500" />
       待审批
+    </span>
+  );
+  const legendConflict = (
+    <span className="flex items-center gap-1">
+      <span className="w-3 h-3 rounded bg-success-500 ring-2 ring-danger-400" />
+      冲突
     </span>
   );
 
@@ -224,6 +267,7 @@ const Resources = () => {
                 <div className="flex items-center gap-4 text-xs text-slate-500">
                   {legendApproved}
                   {legendPending}
+                  {legendConflict}
                   <span className="flex items-center gap-1">
                     <span className="w-3 h-3 rounded bg-danger-500" />
                     封场
@@ -252,11 +296,13 @@ const Resources = () => {
                             {getVenueSchedule(venue.id, date).map((app) => (
                               <div
                                 key={app.id}
-                                className={`absolute top-2 bottom-2 rounded text-white text-xs px-1.5 overflow-hidden whitespace-nowrap cursor-pointer hover:opacity-90 transition-opacity ${
-                                  app.status === "approved" ? "bg-success-500/80" : "bg-warning-500/80"
-                                }`}
+                                className={getBlockClassName(app)}
                                 style={getTimeSlotStyle(app.startTime, app.endTime)}
                                 title={`${app.activityName}\n${app.startTime}-${app.endTime}\n${app.clubName}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openAppDetail(app);
+                                }}
                               >
                                 {app.activityName.slice(0, 4)}
                               </div>
@@ -288,6 +334,7 @@ const Resources = () => {
                 <div className="flex items-center gap-4 text-xs text-slate-500">
                   {legendApproved}
                   {legendPending}
+                  {legendConflict}
                 </div>
               </div>
 
@@ -318,11 +365,10 @@ const Resources = () => {
                               {schedule.map((app) => (
                                 <div
                                   key={app.id}
-                                  className={`absolute top-2 bottom-2 rounded text-white text-xs px-1.5 overflow-hidden whitespace-nowrap cursor-pointer hover:opacity-90 transition-opacity ${
-                                    app.status === "approved" ? "bg-success-500/80" : "bg-warning-500/80"
-                                  }`}
+                                  className={getBlockClassName(app)}
                                   style={getTimeSlotStyle(app.startTime, app.endTime)}
                                   title={`${app.activityName}\n${app.startTime}-${app.endTime}\n${app.clubName} · ${app.venueName}`}
+                                  onClick={() => openAppDetail(app)}
                                 >
                                   {app.clubName.slice(0, 3)}
                                 </div>
@@ -345,6 +391,7 @@ const Resources = () => {
                 <div className="flex items-center gap-4 text-xs text-slate-500">
                   {legendApproved}
                   {legendPending}
+                  {legendConflict}
                 </div>
               </div>
 
@@ -380,11 +427,10 @@ const Resources = () => {
                               {schedule.map((app) => (
                                 <div
                                   key={app.id}
-                                  className={`absolute top-2 bottom-2 rounded text-white text-xs px-1.5 overflow-hidden whitespace-nowrap cursor-pointer hover:opacity-90 transition-opacity ${
-                                    app.status === "approved" ? "bg-success-500/80" : "bg-warning-500/80"
-                                  }`}
+                                  className={getBlockClassName(app)}
                                   style={getTimeSlotStyle(app.startTime, app.endTime)}
                                   title={`${app.activityName}\n${app.startTime}-${app.endTime}\n${app.clubName} · ${app.venueName}`}
+                                  onClick={() => openAppDetail(app)}
                                 >
                                   {app.activityName.slice(0, 4)}
                                 </div>
@@ -448,6 +494,125 @@ const Resources = () => {
           )}
         </Card.Body>
       </Card>
+
+      <Modal
+        isOpen={showAppDetail && !!selectedApp}
+        onClose={() => setShowAppDetail(false)}
+        title="申请详情"
+        size="lg"
+      >
+        {selectedApp && (
+          <div className="space-y-5">
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-800">
+                  {selectedApp.activityName}
+                </h3>
+                <p className="text-sm text-slate-500 mt-1">
+                  {selectedApp.clubName}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <StatusBadge status={selectedApp.status} />
+                <ActivityLevelBadge level={selectedApp.activityLevel} />
+              </div>
+            </div>
+
+            {conflictAppIds.has(selectedApp.id) && (
+              <div className="flex items-center gap-2 p-3 bg-danger-50 border border-danger-200 rounded-lg">
+                <AlertTriangle className="w-4 h-4 text-danger-500 flex-shrink-0" />
+                <span className="text-sm text-danger-700">
+                  该申请涉及待处理冲突
+                </span>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
+                <MapPin className="w-4 h-4 text-primary-500 flex-shrink-0" />
+                <div>
+                  <p className="text-xs text-slate-400">场地</p>
+                  <p className="text-sm font-medium text-slate-700">{selectedApp.venueName}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
+                <Clock className="w-4 h-4 text-primary-500 flex-shrink-0" />
+                <div>
+                  <p className="text-xs text-slate-400">时间</p>
+                  <p className="text-sm font-medium text-slate-700">
+                    {selectedApp.date} {selectedApp.startTime}-{selectedApp.endTime}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
+                <Users className="w-4 h-4 text-primary-500 flex-shrink-0" />
+                <div>
+                  <p className="text-xs text-slate-400">参与人数</p>
+                  <p className="text-sm font-medium text-slate-700">{selectedApp.participantCount} 人</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
+                <User className="w-4 h-4 text-primary-500 flex-shrink-0" />
+                <div>
+                  <p className="text-xs text-slate-400">指导老师</p>
+                  <p className="text-sm font-medium text-slate-700">
+                    {selectedApp.teacherName || "无"}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {selectedApp.equipmentNames.length > 0 && (
+              <div className="flex items-start gap-3 p-3 bg-slate-50 rounded-lg">
+                <Music className="w-4 h-4 text-primary-500 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-xs text-slate-400">使用设备</p>
+                  <div className="flex flex-wrap gap-1.5 mt-1">
+                    {selectedApp.equipmentNames.map((name, idx) => (
+                      <span
+                        key={idx}
+                        className="px-2 py-0.5 bg-primary-50 text-primary-700 text-xs rounded-md"
+                      >
+                        {name}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+              <div className="flex items-center gap-3">
+                <div className="text-xs text-slate-400">优先级评分</div>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-24 h-2 bg-slate-200 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-primary-500 rounded-full"
+                      style={{ width: `${Math.min(calculatePriorityScore(selectedApp), 100)}%` }}
+                    />
+                  </div>
+                  <span className="text-xs font-medium text-slate-600">
+                    {calculatePriorityScore(selectedApp)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {selectedApp.remark && (
+              <div className="p-3 bg-slate-50 rounded-lg">
+                <p className="text-xs text-slate-400 mb-1">备注</p>
+                <p className="text-sm text-slate-700">{selectedApp.remark}</p>
+              </div>
+            )}
+
+            <div className="flex justify-end pt-2">
+              <Button variant="ghost" onClick={() => setShowAppDetail(false)}>
+                关闭
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       <Modal
         isOpen={showVenueDetail && !!selectedVenue}
@@ -516,14 +681,31 @@ const Resources = () => {
                         {schedule.map((app) => (
                           <div
                             key={app.id}
-                            className="px-2 py-1.5 bg-success-50 rounded text-xs"
+                            className={`px-2 py-1.5 rounded text-xs cursor-pointer hover:bg-slate-100 transition-colors ${
+                              conflictAppIds.has(app.id)
+                                ? "bg-danger-50 ring-1 ring-danger-200"
+                                : "bg-success-50"
+                            }`}
+                            onClick={() => {
+                              setShowVenueDetail(false);
+                              openAppDetail(app);
+                            }}
                           >
-                            <span className="text-success-700 font-medium">
+                            <span
+                              className={
+                                conflictAppIds.has(app.id)
+                                  ? "text-danger-700 font-medium"
+                                  : "text-success-700 font-medium"
+                              }
+                            >
                               {app.startTime}-{app.endTime}
                             </span>
                             <span className="text-slate-600 ml-2">
                               {app.activityName}
                             </span>
+                            {conflictAppIds.has(app.id) && (
+                              <AlertTriangle className="w-3 h-3 inline ml-1 text-danger-500" />
+                            )}
                           </div>
                         ))}
                         {blocked.map((b) => (
